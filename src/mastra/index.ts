@@ -7,27 +7,30 @@ import { classificationScorerTool } from "./tools/classification-scorer";
 import { classificationWorkflow } from "./workflows/classification-workflow";
 
 export const mastra = new Mastra({
-  agents: {
-    wasteClassifier: wasteClassifierAgent
-  },
-  
-  workflows: {
-    classificationWorkflow
-  },
-  
-  // storage: new LibSQLStore({
-  //   url: process.env.NODE_ENV === "production" 
-  //     ? process.env.DATABASE_URL! 
-  //     : ":memory:"
-  // }),
-  
-  // logger: new PinoLogger({
-  //   name: "WasteClassifier",
-  //   level: "info"
-  // }),
-  
-  server: {
-    port: parseInt(process.env.PORT || "4111"),
-    timeout: 120000, // 增加到120秒
-  }
+	agents: {
+		wasteClassifier: wasteClassifierAgent,
+	},
+	server: {
+		host: '0.0.0.0', // 允许外网访问
+		port: 4111,
+	},
+	workflows: {
+		classificationWorkflow,
+	},
+
+	// storage: new LibSQLStore({
+	//   url: process.env.NODE_ENV === "production"
+	//     ? process.env.DATABASE_URL!
+	//     : ":memory:"
+	// }),
+
+	// logger: new PinoLogger({
+	//   name: "WasteClassifier",
+	//   level: "info"
+	// }),
+
+	server: {
+		port: parseInt(process.env.PORT || '4111'),
+		timeout: 120000, // 增加到120秒
+	},
 });
