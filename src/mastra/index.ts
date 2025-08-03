@@ -27,6 +27,7 @@ export const mastra = new Mastra({
   // }),
   
   server: {
+    host: '0.0.0.0', // 允许外网访问
     port: parseInt(process.env.PORT || "4111"),
     timeout: 120000, // 增加到120秒
   }
