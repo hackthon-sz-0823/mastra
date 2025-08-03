@@ -7,6 +7,11 @@ import { classificationScorerTool } from "./tools/classification-scorer";
 import { classificationWorkflow } from "./workflows/classification-workflow";
 
 export const mastra = new Mastra({
+  server: {
+    host: '0.0.0.0', // 允许外网访问
+    port: parseInt(process.env.PORT || "4111"),
+    timeout: 120000, // 增加到120秒
+  },
   agents: {
     wasteClassifier: wasteClassifierAgent
   },
@@ -26,9 +31,5 @@ export const mastra = new Mastra({
   //   level: "info"
   // }),
   
-  server: {
-    host: '0.0.0.0', // 允许外网访问
-    port: parseInt(process.env.PORT || "4111"),
-    timeout: 120000, // 增加到120秒
-  }
+  
 });
