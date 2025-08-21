@@ -1,4 +1,6 @@
 import { createTool } from "@mastra/core/tools";
+import { generateObject } from "ai";
+import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { WasteClassificationScorer } from "../../utils/scoring";
 import { ClassificationScore } from "../../types/waste-types";
@@ -13,7 +15,8 @@ export const classificationScorerTool = createTool({
     description: z.string().describe("垃圾描述"),
     characteristics: z.array(z.string()).describe("垃圾特征列表"),
     materialType: z.string().describe("材料类型"),
-    disposalInstructions: z.string().describe("处理指导")
+    disposalInstructions: z.string().describe("处理指导"),
+    processingTimeMs: z.number().optional().describe("处理耗时毫秒")
   }),
   outputSchema: z.object({
     match: z.boolean().describe("分类是否匹配"),
@@ -32,7 +35,8 @@ export const classificationScorerTool = createTool({
       description, 
       characteristics,
       materialType,
-      disposalInstructions 
+      disposalInstructions,
+      processingTimeMs = 0
     } = context;
     
     // 基础评分计算
@@ -71,39 +75,57 @@ export const classificationScorerTool = createTool({
 请用专业但通俗易懂的语言，帮助用户更好地理解垃圾分类。`;
 
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          messages: [{ role: "user", content: analysisPrompt }],
-          temperature: 0.3,
-          max_tokens: 1000
-        })
+      const result = await generateObject({
+        model: openai('gpt-4o'),
+        messages: [
+          {
+            role: 'system',
+            content: '你是一位专业的垃圾分类评分专家，请根据给定信息提供详细分析。'
+          },
+          {
+            role: 'user', 
+            content: analysisPrompt
+          }
+        ],
+        schema: z.object({
+          detailedAnalysis: z.string(),
+          enhancedSuggestions: z.array(z.string()),
+          enhancedTips: z.array(z.string()),
+          learningPoints: z.array(z.string())
+        }),
+        temperature: 0.3,
+        maxTokens: 1000
       });
 
-      if (!response.ok) {
-        throw new Error(`OpenAI API error: ${response.statusText}`);
-      }
+      const aiAnalysis = result.object;
 
-      const data = await response.json();
-      const detailedAnalysis = data.choices[0].message.content;
+      // 合并AI生成的建议和基础建议
+      const enhancedSuggestions = [
+        ...basicScore.suggestions,
+        ...(aiAnalysis.enhancedSuggestions || [])
+      ];
 
-      // 生成学习要点
-      const learningPoints = [
+      const enhancedTips = [
+        ...basicScore.improvementTips,
+        ...(aiAnalysis.enhancedTips || [])
+      ];
+
+      const finalLearningPoints = [
         `${detectedCategory}的主要特征：${characteristics.slice(0, 2).join(", ")}`,
         `材料类型：${materialType}`,
         `正确处理方式：${disposalInstructions}`,
-        confidence > 0.8 ? "AI识别置信度较高，结果可信度强" : "建议提高图片质量以获得更准确的识别结果"
+        confidence > 0.8 ? "AI识别置信度较高，结果可信度强" : "建议提高图片质量以获得更准确的识别结果",
+        ...(aiAnalysis.learningPoints || [])
       ];
 
       return {
-        ...basicScore,
-        detailedAnalysis,
-        learningPoints
+        match: basicScore.match,
+        score: basicScore.score,
+        reasoning: basicScore.reasoning,
+        suggestions: enhancedSuggestions.slice(0, 6), // 限制建议数量
+        improvementTips: enhancedTips.slice(0, 6), // 限制提示数量
+        detailedAnalysis: aiAnalysis.detailedAnalysis || "详细分析生成中...",
+        learningPoints: finalLearningPoints.slice(0, 8) // 限制学习要点数量
       };
 
     } catch (error) {

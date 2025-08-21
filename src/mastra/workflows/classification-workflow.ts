@@ -3,8 +3,7 @@ import { z } from "zod";
 
 const inputSchema = z.object({
   imageUrl: z.string().url(),
-  expectedCategory: z.string(),
-  userLocation: z.string().optional()
+  expectedCategory: z.string()
 });
 
 const analysisStep = createStep({
@@ -18,8 +17,12 @@ const analysisStep = createStep({
     characteristics: z.array(z.string()),
     materialType: z.string(),
     disposalInstructions: z.string(),
-    expectedCategory: z.string(), // 传递给下一步
-    userLocation: z.string().optional()
+    processingTimeMs: z.number(),
+    rawResponse: z.object({}).optional(),
+    analysisSteps: z.array(z.string()),
+    confidenceFactors: z.array(z.string()),
+    // 传递给下一步的数据
+    expectedCategory: z.string()
   }),
   execute: async ({ inputData, mastra }) => {
     const agent = mastra?.getAgent("wasteClassifier");
@@ -27,7 +30,6 @@ const analysisStep = createStep({
     
     const prompt = `请使用图像分析工具分析这张垃圾图片：
     - 图片URL: ${inputData.imageUrl}
-    - 用户位置: ${inputData.userLocation || '中国'}
     
     请调用 analyze-waste-image 工具进行分析。`;
     
@@ -38,8 +40,7 @@ const analysisStep = createStep({
       const result = JSON.parse(response.text);
       return {
         ...result,
-        expectedCategory: inputData.expectedCategory, // 传递期望分类
-        userLocation: inputData.userLocation
+        expectedCategory: inputData.expectedCategory
       };
     } catch {
       // 如果解析失败，返回默认结构
@@ -50,8 +51,10 @@ const analysisStep = createStep({
         characteristics: ["解析错误"],
         materialType: "未知",
         disposalInstructions: "请重试或手动分类",
-        expectedCategory: inputData.expectedCategory,
-        userLocation: inputData.userLocation
+        processingTimeMs: 0,
+        analysisSteps: ["解析失败"],
+        confidenceFactors: ["解析错误"],
+        expectedCategory: inputData.expectedCategory
       };
     }
   }
@@ -67,8 +70,11 @@ const scoringStep = createStep({
     characteristics: z.array(z.string()),
     materialType: z.string(),
     disposalInstructions: z.string(),
-    expectedCategory: z.string(),
-    userLocation: z.string().optional()
+    processingTimeMs: z.number(),
+    rawResponse: z.object({}).optional(),
+    analysisSteps: z.array(z.string()),
+    confidenceFactors: z.array(z.string()),
+    expectedCategory: z.string()
   }),
   outputSchema: z.object({
     score: z.number(),
@@ -78,21 +84,31 @@ const scoringStep = createStep({
     improvementTips: z.array(z.string()),
     detailedAnalysis: z.string(),
     learningPoints: z.array(z.string()),
-    // 保留分析数据给最终步骤
+    // 保留完整分析数据给最终步骤
     analysisData: z.object({
       detectedCategory: z.string(),
       confidence: z.number(),
       description: z.string(),
       characteristics: z.array(z.string()),
       materialType: z.string(),
-      disposalInstructions: z.string()
+      disposalInstructions: z.string(),
+      processingTimeMs: z.number(),
+      rawResponse: z.object({}).optional(),
+      analysisSteps: z.array(z.string()),
+      confidenceFactors: z.array(z.string())
+    }),
+    // 保留输入数据
+    inputData: z.object({
+      expectedCategory: z.string(),
+      imageUrl: z.string()
     })
   }),
   execute: async ({ inputData, mastra }) => {
     const agent = mastra?.getAgent("wasteClassifier");
     if (!agent) throw new Error("Waste classifier agent not found");
     
-    const { expectedCategory, userLocation, ...analysisResult } = inputData;
+    const { expectedCategory, ...analysisResult } = inputData;
+    
     const prompt = `请使用评分工具对以下分类结果进行评分：
     - 检测结果：${analysisResult.detectedCategory}
     - 预期分类：${expectedCategory}
@@ -101,6 +117,7 @@ const scoringStep = createStep({
     - 特征：${analysisResult.characteristics.join(", ")}
     - 材料类型：${analysisResult.materialType}
     - 处理指导：${analysisResult.disposalInstructions}
+    - 处理耗时：${analysisResult.processingTimeMs}ms
     
     请调用 score-classification-result 工具进行详细评分。`;
     
@@ -110,7 +127,11 @@ const scoringStep = createStep({
       const result = JSON.parse(response.text);
       return {
         ...result,
-        analysisData: analysisResult // 保留分析数据
+        analysisData: analysisResult,
+        inputData: {
+          expectedCategory,
+          imageUrl: inputData.imageUrl || ""
+        }
       };
     } catch {
       // 如果解析失败，返回基础评分
@@ -123,7 +144,11 @@ const scoringStep = createStep({
         improvementTips: ["确保图片清晰", "重新尝试分析"],
         detailedAnalysis: "评分分析生成失败，但基础功能正常",
         learningPoints: ["基础分类逻辑正常工作"],
-        analysisData: analysisResult
+        analysisData: analysisResult,
+        inputData: {
+          expectedCategory,
+          imageUrl: inputData.imageUrl || ""
+        }
       };
     }
   }
@@ -146,17 +171,45 @@ const summaryStep = createStep({
       description: z.string(),
       characteristics: z.array(z.string()),
       materialType: z.string(),
-      disposalInstructions: z.string()
+      disposalInstructions: z.string(),
+      processingTimeMs: z.number(),
+      rawResponse: z.object({}).optional(),
+      analysisSteps: z.array(z.string()),
+      confidenceFactors: z.array(z.string())
+    }),
+    inputData: z.object({
+      expectedCategory: z.string(),
+      imageUrl: z.string()
     })
   }),
   outputSchema: z.object({
+    // 完整的数据库记录格式
+    classificationRecord: z.object({
+      walletAddress: z.string(),
+      imageUrl: z.string(),
+      expectedCategory: z.string(),
+      aiDetectedCategory: z.string(),
+      aiConfidence: z.number(),
+      isCorrect: z.boolean(),
+      score: z.number(),
+      aiAnalysis: z.string(),
+      aiResponse: z.object({}),
+      processingTimeMs: z.number(),
+      userLocation: z.string().optional(),
+      deviceInfo: z.string().optional()
+    }),
+    // 详细分析和评分结果
     analysisResult: z.object({
       detectedCategory: z.string(),
       confidence: z.number(),
       description: z.string(),
       characteristics: z.array(z.string()),
       materialType: z.string(),
-      disposalInstructions: z.string()
+      disposalInstructions: z.string(),
+      processingTimeMs: z.number(),
+      rawResponse: z.object({}).optional(),
+      analysisSteps: z.array(z.string()),
+      confidenceFactors: z.array(z.string())
     }),
     scoringResult: z.object({
       score: z.number(),
@@ -174,7 +227,7 @@ const summaryStep = createStep({
     })
   }),
   execute: async ({ inputData }) => {
-    const { analysisData, ...scoringResult } = inputData;
+    const { analysisData, inputData: originalInput, ...scoringResult } = inputData;
     
     let recommendation = "";
     if (scoringResult.score >= 85) {
@@ -186,8 +239,26 @@ const summaryStep = createStep({
     } else {
       recommendation = "❌ 需要重新学习！建议仔细阅读垃圾分类指南。";
     }
+
+    // 构建完整的数据库记录
+    const classificationRecord = {
+      imageUrl: originalInput.imageUrl,
+      expectedCategory: originalInput.expectedCategory,
+      aiDetectedCategory: analysisData.detectedCategory,
+      aiConfidence: analysisData.confidence,
+      isCorrect: scoringResult.match,
+      score: scoringResult.score,
+      aiAnalysis: scoringResult.detailedAnalysis,
+      aiResponse: {
+        analysis: analysisData,
+        scoring: scoringResult,
+        timestamp: new Date().toISOString()
+      },
+      processingTimeMs: analysisData.processingTimeMs
+    };
     
     return {
+      classificationRecord,
       analysisResult: analysisData,
       scoringResult,
       summary: {
@@ -204,13 +275,30 @@ export const classificationWorkflow = createWorkflow({
   description: "垃圾分类识别和评分完整工作流",
   inputSchema,
   outputSchema: z.object({
+    // 完整的数据库记录格式
+    classificationRecord: z.object({
+      imageUrl: z.string(),
+      expectedCategory: z.string(),
+      aiDetectedCategory: z.string(),
+      aiConfidence: z.number(),
+      isCorrect: z.boolean(),
+      score: z.number(),
+      aiAnalysis: z.string(),
+      aiResponse: z.object({}),
+      processingTimeMs: z.number()
+    }),
+    // 详细分析和评分结果
     analysisResult: z.object({
       detectedCategory: z.string(),
       confidence: z.number(),
       description: z.string(),
       characteristics: z.array(z.string()),
       materialType: z.string(),
-      disposalInstructions: z.string()
+      disposalInstructions: z.string(),
+      processingTimeMs: z.number(),
+      rawResponse: z.object({}).optional(),
+      analysisSteps: z.array(z.string()),
+      confidenceFactors: z.array(z.string())
     }),
     scoringResult: z.object({
       score: z.number(),

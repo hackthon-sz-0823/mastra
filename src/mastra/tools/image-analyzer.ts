@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import { generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { WasteAnalysisResult } from "../../types/waste-types";
+import { DetailedAnalysisResult } from "../../types/waste-types";
 
 export const imageAnalyzerTool = createTool({
   id: "analyze-waste-image",
@@ -17,12 +17,17 @@ export const imageAnalyzerTool = createTool({
     description: z.string().describe("垃圾的详细描述"),
     characteristics: z.array(z.string()).describe("垃圾的特征列表"),
     materialType: z.string().describe("材料类型"),
-    disposalInstructions: z.string().describe("处理指导")
+    disposalInstructions: z.string().describe("处理指导"),
+    processingTimeMs: z.number().describe("处理耗时毫秒"),
+    rawResponse: z.object({}).describe("原始AI响应"),
+    analysisSteps: z.array(z.string()).describe("分析步骤"),
+    confidenceFactors: z.array(z.string()).describe("置信度影响因素")
   }),
   execute: async ({ context }) => {
     const { imageUrl, location = "中国" } = context;
     
     console.log(`🔍 开始分析图片: ${imageUrl}`);
+    const startTime = Date.now();
     
     try {
       // 验证图片URL
@@ -128,13 +133,17 @@ export const imageAnalyzerTool = createTool({
           description: z.string(),
           characteristics: z.array(z.string()),
           materialType: z.string(),
-          disposalInstructions: z.string()
+          disposalInstructions: z.string(),
+          analysisSteps: z.array(z.string()),
+          confidenceFactors: z.array(z.string())
         }),
         temperature: 0.1, // 降低随机性，提高准确性
         maxTokens: 1000
       });
 
       const analysis = result.object;
+      const endTime = Date.now();
+      const processingTimeMs = endTime - startTime;
       
       // 数据清理和验证
       const cleanResult = {
@@ -145,12 +154,20 @@ export const imageAnalyzerTool = createTool({
           ? analysis.characteristics.slice(0, 5).filter(Boolean)
           : ["特征识别不完整"],
         materialType: analysis.materialType || "材质不明",
-        disposalInstructions: analysis.disposalInstructions || "请咨询当地垃圾分类指南"
+        disposalInstructions: analysis.disposalInstructions || "请咨询当地垃圾分类指南",
+        processingTimeMs,
+        rawResponse: result.object,
+        analysisSteps: Array.isArray(analysis.analysisSteps) && analysis.analysisSteps.length > 0
+          ? analysis.analysisSteps
+          : ["图像预处理", "特征提取", "分类识别", "置信度计算"],
+        confidenceFactors: Array.isArray(analysis.confidenceFactors) && analysis.confidenceFactors.length > 0
+          ? analysis.confidenceFactors
+          : ["图片清晰度", "特征明显程度", "分类标准匹配度"]
       };
 
-      console.log(`✅ 图片分析成功: ${cleanResult.detectedCategory} (置信度: ${(cleanResult.confidence * 100).toFixed(1)}%)`);
+      console.log(`✅ 图片分析成功: ${cleanResult.detectedCategory} (置信度: ${(cleanResult.confidence * 100).toFixed(1)}%) 耗时: ${processingTimeMs}ms`);
       
-      return cleanResult as WasteAnalysisResult;
+      return cleanResult as DetailedAnalysisResult;
 
     } catch (error) {
       console.error("❌ 图片分析失败:", error);
@@ -198,14 +215,21 @@ export const imageAnalyzerTool = createTool({
         }
       }
 
+      const endTime = Date.now();
+      const processingTimeMs = endTime - startTime;
+
       return {
         detectedCategory: "识别失败",
         confidence: 0,
         description: `${errorMessage}。错误详情：${error instanceof Error ? error.message : '未知错误'}`,
         characteristics,
         materialType: "未知",
-        disposalInstructions: "无法提供处理建议，请尝试重新分析或人工识别"
-      } as WasteAnalysisResult;
+        disposalInstructions: "无法提供处理建议，请尝试重新分析或人工识别",
+        processingTimeMs,
+        rawResponse: { error: error instanceof Error ? error.message : '未知错误' },
+        analysisSteps: ["错误处理"],
+        confidenceFactors: ["分析失败"]
+      } as DetailedAnalysisResult;
     }
   }
 });
