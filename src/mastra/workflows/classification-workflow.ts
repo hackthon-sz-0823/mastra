@@ -22,7 +22,8 @@ const analysisStep = createStep({
     analysisSteps: z.array(z.string()),
     confidenceFactors: z.array(z.string()),
     // 传递给下一步的数据
-    expectedCategory: z.string()
+    expectedCategory: z.string(),
+    imageUrl: z.string()
   }),
   execute: async ({ inputData, mastra }) => {
     const agent = mastra?.getAgent("wasteClassifier");
@@ -40,7 +41,8 @@ const analysisStep = createStep({
       const result = JSON.parse(response.text);
       return {
         ...result,
-        expectedCategory: inputData.expectedCategory
+        expectedCategory: inputData.expectedCategory,
+        imageUrl: inputData.imageUrl
       };
     } catch {
       // 如果解析失败，返回默认结构
@@ -54,7 +56,8 @@ const analysisStep = createStep({
         processingTimeMs: 0,
         analysisSteps: ["解析失败"],
         confidenceFactors: ["解析错误"],
-        expectedCategory: inputData.expectedCategory
+        expectedCategory: inputData.expectedCategory,
+        imageUrl: inputData.imageUrl
       };
     }
   }
@@ -74,7 +77,8 @@ const scoringStep = createStep({
     rawResponse: z.object({}).optional(),
     analysisSteps: z.array(z.string()),
     confidenceFactors: z.array(z.string()),
-    expectedCategory: z.string()
+    expectedCategory: z.string(),
+    imageUrl: z.string() // 添加缺失的imageUrl字段
   }),
   outputSchema: z.object({
     score: z.number(),
@@ -107,7 +111,7 @@ const scoringStep = createStep({
     const agent = mastra?.getAgent("wasteClassifier");
     if (!agent) throw new Error("Waste classifier agent not found");
     
-    const { expectedCategory, ...analysisResult } = inputData;
+    const { expectedCategory, imageUrl, ...analysisResult } = inputData;
     
     const prompt = `请使用评分工具对以下分类结果进行评分：
     - 检测结果：${analysisResult.detectedCategory}
@@ -130,7 +134,7 @@ const scoringStep = createStep({
         analysisData: analysisResult,
         inputData: {
           expectedCategory,
-          imageUrl: inputData.imageUrl || ""
+          imageUrl
         }
       };
     } catch {
@@ -147,7 +151,7 @@ const scoringStep = createStep({
         analysisData: analysisResult,
         inputData: {
           expectedCategory,
-          imageUrl: inputData.imageUrl || ""
+          imageUrl
         }
       };
     }
@@ -183,20 +187,15 @@ const summaryStep = createStep({
     })
   }),
   outputSchema: z.object({
-    // 完整的数据库记录格式
+    // 完整的数据库记录格式 - 7个需要的字段
     classificationRecord: z.object({
-      walletAddress: z.string(),
-      imageUrl: z.string(),
-      expectedCategory: z.string(),
-      aiDetectedCategory: z.string(),
-      aiConfidence: z.number(),
-      isCorrect: z.boolean(),
+      ai_detected_category: z.string(),
+      ai_confidence: z.number(),
+      is_correct: z.boolean(),
       score: z.number(),
-      aiAnalysis: z.string(),
-      aiResponse: z.object({}),
-      processingTimeMs: z.number(),
-      userLocation: z.string().optional(),
-      deviceInfo: z.string().optional()
+      ai_analysis: z.string(),
+      ai_response: z.object({}),
+      processing_time_ms: z.number()
     }),
     // 详细分析和评分结果
     analysisResult: z.object({
@@ -227,7 +226,7 @@ const summaryStep = createStep({
     })
   }),
   execute: async ({ inputData }) => {
-    const { analysisData, inputData: originalInput, ...scoringResult } = inputData;
+    const { analysisData, inputData: originalInputData, ...scoringResult } = inputData;
     
     let recommendation = "";
     if (scoringResult.score >= 85) {
@@ -240,21 +239,23 @@ const summaryStep = createStep({
       recommendation = "❌ 需要重新学习！建议仔细阅读垃圾分类指南。";
     }
 
-    // 构建完整的数据库记录
+    // 构建完整的数据库记录 - 7个需要的字段
     const classificationRecord = {
-      imageUrl: originalInput.imageUrl,
-      expectedCategory: originalInput.expectedCategory,
-      aiDetectedCategory: analysisData.detectedCategory,
-      aiConfidence: analysisData.confidence,
-      isCorrect: scoringResult.match,
+      ai_detected_category: analysisData.detectedCategory,
+      ai_confidence: analysisData.confidence,
+      is_correct: scoringResult.match,
       score: scoringResult.score,
-      aiAnalysis: scoringResult.detailedAnalysis,
-      aiResponse: {
+      ai_analysis: scoringResult.detailedAnalysis,
+      ai_response: {
         analysis: analysisData,
         scoring: scoringResult,
+        input: {
+          imageUrl: originalInputData.imageUrl,
+          expectedCategory: originalInputData.expectedCategory
+        },
         timestamp: new Date().toISOString()
       },
-      processingTimeMs: analysisData.processingTimeMs
+      processing_time_ms: analysisData.processingTimeMs
     };
     
     return {
@@ -272,20 +273,18 @@ const summaryStep = createStep({
 
 export const classificationWorkflow = createWorkflow({
   id: "waste-classification-workflow",
-  description: "垃圾分类识别和评分完整工作流",
+  description: "垃圾分类识别和评分完整工作流，返回数据库需要的7个字段",
   inputSchema,
   outputSchema: z.object({
-    // 完整的数据库记录格式
+    // 完整的数据库记录格式 - 7个需要的字段
     classificationRecord: z.object({
-      imageUrl: z.string(),
-      expectedCategory: z.string(),
-      aiDetectedCategory: z.string(),
-      aiConfidence: z.number(),
-      isCorrect: z.boolean(),
+      ai_detected_category: z.string(),
+      ai_confidence: z.number(),
+      is_correct: z.boolean(),
       score: z.number(),
-      aiAnalysis: z.string(),
-      aiResponse: z.object({}),
-      processingTimeMs: z.number()
+      ai_analysis: z.string(),
+      ai_response: z.object({}),
+      processing_time_ms: z.number()
     }),
     // 详细分析和评分结果
     analysisResult: z.object({
