@@ -7,7 +7,11 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "mastra dev",
     "build": "mastra build",
-    "start": "mastra start"
+    "start": "mastra start",
+    "build:worker": "npx tsc src/worker.ts --outDir dist --target ES2022 --module ESNext --moduleResolution node --skipLibCheck",
+    "deploy": "wrangler deploy",
+    "deploy:dev": "wrangler deploy --env development",
+    "wrangler:dev": "wrangler dev"
   },
   "keywords": [],
   "author": "",
@@ -27,6 +31,7 @@
   "devDependencies": {
     "@types/node": "^24.1.0",
     "mastra": "^0.10.18",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "wrangler": "^4.32.0"
   }
 }

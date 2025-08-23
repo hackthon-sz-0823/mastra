@@ -1,6 +1,7 @@
 output.txt
 node_modules
 dist
+wrangler.toml
 .mastra
 .env.development
 .env
